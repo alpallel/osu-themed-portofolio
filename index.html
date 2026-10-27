@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>osu!lazer — triangles (cYsmix)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main id="stage-viewport">
+    <canvas id="intro-canvas" aria-label="osu!lazer triangles intro"></canvas>
+  </main>
+
+  <!-- Shown only if browser blocks unmuted autoplay before first interaction -->
+  <div id="start-overlay" role="button" tabindex="0" aria-label="Click to launch osu!lazer intro">
+    <div class="launch-ring">
+      <span>osu!</span>
+    </div>
+    <div class="launch-prompt">
+      <div class="launch-title">click anywhere to launch</div>
+      <div class="launch-subtitle">cYsmix — triangles · 1:1 osu!lazer intro</div>
+      <div class="launch-modes">
+        <button id="btn-start-intro" class="mode-btn primary" type="button">
+          Launch Intro (0:07.15)
+        </button>
+        <button id="btn-start-full" class="mode-btn" type="button">
+          Full Sequence w/ Pre-Launch (0:04.10)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auto-hiding transport HUD (top-right hover or press H) -->
+  <nav id="hud-bar" aria-label="Playback controls">
+    <button id="btn-replay-intro" class="hud-btn" type="button" title="Replay Triangles Intro (R)">
+      Replay Intro
+    </button>
+    <button id="btn-replay-full" class="hud-btn" type="button" title="Replay Full Sequence (D)">
+      Full Sequence
+    </button>
+    <button id="btn-play-pause" class="hud-btn" type="button" title="Play / Pause (Space)">
+      Pause
+    </button>
+    <input id="hud-scrubber" type="range" min="0" max="100" step="0.05" value="0" aria-label="Timeline scrubber" />
+    <span id="hud-time">0:00.00</span>
+  </nav>
+
+  <script src="logo-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
+
