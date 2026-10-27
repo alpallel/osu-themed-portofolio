@@ -71,30 +71,27 @@ body {
   width: 132px;
   height: 132px;
   border-radius: 50%;
-  border: 2.5px solid rgba(255, 255, 255, 0.85);
-  background: radial-gradient(circle at 38% 35%, #f274ad 0%, #e05794 70%, #c8447f 100%);
+  border: 4.5px solid #ffffff;
+  background: #1e1c24 url('assets/pfp.jpeg') center / cover no-repeat;
   box-shadow:
-    0 0 0 8px rgba(232, 102, 160, 0.14),
+    0 0 0 7px rgba(255, 255, 255, 0.18),
     0 16px 48px rgba(0, 0, 0, 0.65);
   display: flex;
   align-items: center;
   justify-content: center;
   transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease;
+  overflow: hidden;
 }
 
 #start-overlay:hover .launch-ring {
   transform: scale(1.07);
   box-shadow:
-    0 0 0 12px rgba(232, 102, 160, 0.24),
-    0 20px 60px rgba(232, 102, 160, 0.35);
+    0 0 0 10px rgba(255, 255, 255, 0.28),
+    0 20px 60px rgba(0, 0, 0, 0.75);
 }
 
 .launch-ring span {
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  color: #ffffff;
-  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  display: none;
 }
 
 .launch-prompt {

@@ -55,7 +55,21 @@
   bgImage.onload = () => {
     bgLoaded = true;
   };
-  bgImage.src = 'assets/bg.png';
+  bgImage.src = 'assets/blurred-bg.webp';
+  if (bgImage.complete && bgImage.naturalWidth > 0) {
+    bgLoaded = true;
+  }
+
+  // Load Profile Picture for Logo (replaces inner osu! logo inside the frame circle)
+  const pfpImage = new Image();
+  let pfpLoaded = false;
+  pfpImage.onload = () => {
+    pfpLoaded = true;
+  };
+  pfpImage.src = 'assets/pfp.jpeg';
+  if (pfpImage.complete && pfpImage.naturalWidth > 0) {
+    pfpLoaded = true;
+  }
 
   // Audio & Web Audio API Analyser
   const audio = new Audio();
@@ -173,7 +187,7 @@
 
   // --- LogoVisualisation State (osu.Game/Screens/Menu/LogoVisualisation.cs) ---
   // 200 bars per visualiser, repeated 5 times around 360 deg, rotating by 5 indices every 20ms
-  const BARS_PER_VISUALISER = 200;
+  const BARS_PER_VISUALISER = 0;
   const VISUALISER_ROUNDS = 5;
   const TOTAL_BARS = BARS_PER_VISUALISER * VISUALISER_ROUNDS; // 1000 radial positions
   const barAmplitudes = new Float32Array(BARS_PER_VISUALISER);
@@ -543,10 +557,12 @@
 
     const contours = window.OSU_LOGO_DATA.contours;
 
+    // Only draw the frame circle contours (circle_outer and circle_inner)
     // 1. Pass 1 (InternalChildren[0]): highlight (Color4.White) where pWhite <= u
     ctx.strokeStyle = '#ffffff';
     ctx.beginPath();
     for (let c = 0; c < contours.length; c++) {
+      if (contours[c].name !== 'circle_outer' && contours[c].name !== 'circle_inner') continue;
       const { points, pWhite, pGray } = contours[c];
       const n = points.length;
       for (let i = 0; i < n; i++) {
@@ -565,6 +581,7 @@
     ctx.strokeStyle = '#999999';
     ctx.beginPath();
     for (let c = 0; c < contours.length; c++) {
+      if (contours[c].name !== 'circle_outer' && contours[c].name !== 'circle_inner') continue;
       const { points, pGray } = contours[c];
       const n = points.length;
       for (let i = 0; i < n; i++) {
@@ -605,8 +622,8 @@
       }
       bassEnergy = bassSum / 16.0;
 
-      // Update LogoVisualisation 200 frequency bars every 20ms (50Hz) with index_change = 5
-      if (Math.abs(audioMs - lastVisUpdateMs) >= 20.0) {
+      // Update LogoVisualisation frequency bars every 20ms (50Hz) with index_change = 5
+      if (BARS_PER_VISUALISER > 0 && Math.abs(audioMs - lastVisUpdateMs) >= 20.0) {
         lastVisUpdateMs = audioMs;
         visIndexOffset = (visIndexOffset + 5) % BARS_PER_VISUALISER;
         const kiaiBoost = isKiaiTime(audioMs) ? 1.35 : 1.0;
@@ -799,8 +816,8 @@
       ctx.restore();
     }
 
-    // 2. Draw LogoVisualisation (200 bars * 5 rounds around perimeter at r = 214px)
-    if (audioMs >= DROP_AUDIO_MS && audioMs < 132500) {
+    // 2. Draw LogoVisualisation (bars around perimeter at r = 214px)
+    if (BARS_PER_VISUALISER > 0 && TOTAL_BARS > 0 && audioMs >= DROP_AUDIO_MS && audioMs < 132500) {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = 'rgba(255, 255, 255, 0.34)';
@@ -822,91 +839,68 @@
       ctx.restore();
     }
 
-    // 3. Outer Shadow behind White Cookie Ring
+    // 3. Outer Shadow behind White Frame Circle (Outer Radius = 215.5px)
+    const isDimmedOutro = audioMs >= 132600;
     ctx.save();
     ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
     ctx.shadowBlur = 28;
-    ctx.fillStyle = audioMs >= 132600 ? '#bdbdbd' : '#ffffff';
+    ctx.fillStyle = isDimmedOutro ? '#e0632d' : '#e0632d';
     ctx.beginPath();
     ctx.arc(0, 0, LOGO_OUTER_R, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
-    // 4. Inner Pink Circle + Clipped Rising Triangles
+    // 4. Inner Circle with Profile Picture (Inner Radius = 194.0px, preserving 21.5px frame ring)
     ctx.save();
     ctx.beginPath();
     ctx.arc(0, 0, LOGO_INNER_R, 0, Math.PI * 2);
     ctx.clip();
 
-    // Base pink fill (dims slightly at 132.6s when track ends, matching end_021.png)
-    const isDimmedOutro = audioMs >= 132600;
-    ctx.fillStyle = isDimmedOutro ? '#a84c78' : '#e866a0';
-    ctx.fillRect(-LOGO_INNER_R, -LOGO_INNER_R, LOGO_INNER_R * 2, LOGO_INNER_R * 2);
-
-    // Update and draw rising equilateral triangles inside the pink circle
-    const speedMult =
-      1.0 +
-      (audioMs >= DROP_AUDIO_MS && audioMs < 130800
-        ? audioMetrics.bassEnergy * 3.8 + (kiai ? 1.4 : 0.4)
-        : 0.0);
-    const stepDt = clamp(dtMs, 0, 50);
-    const hFactor = Math.sqrt(3) / 2;
-
-    for (let i = 0; i < logoTriangles.length; i++) {
-      const tr = logoTriangles[i];
-      if (!audio.paused) {
-        tr.y -= tr.speed * speedMult * stepDt;
-        const h = tr.size * hFactor;
-        if (tr.y + h / 2 < -LOGO_INNER_R - 10) {
-          tr.y = LOGO_INNER_R + h / 2 + 10;
-        }
+    if (pfpLoaded) {
+      // Cover the circle while maintaining 1:1 aspect ratio
+      const pw = pfpImage.naturalWidth || pfpImage.width || 2048;
+      const ph = pfpImage.naturalHeight || pfpImage.height || 2048;
+      const aspect = pw / ph;
+      let dw = LOGO_INNER_R * 2;
+      let dh = LOGO_INNER_R * 2;
+      let dx = -LOGO_INNER_R;
+      let dy = -LOGO_INNER_R;
+      if (aspect > 1) {
+        dw = dh * aspect;
+        dx = -dw / 2;
+      } else if (aspect < 1) {
+        dh = dw / aspect;
+        dy = -dh / 2;
       }
-      const h = tr.size * hFactor;
-      // Blend between darker and lighter pink triangles just like osu!lazer OsuLogo
-      if (tr.shade > 0.5) {
-        ctx.fillStyle = isDimmedOutro
-          ? `rgba(210, 110, 158, ${(tr.alpha * 0.85).toFixed(3)})`
-          : `rgba(255, 148, 194, ${tr.alpha.toFixed(3)})`;
-      } else {
-        ctx.fillStyle = isDimmedOutro
-          ? `rgba(130, 52, 88, ${(tr.alpha * 0.9).toFixed(3)})`
-          : `rgba(198, 66, 126, ${tr.alpha.toFixed(3)})`;
-      }
-      ctx.beginPath();
-      ctx.moveTo(tr.x, tr.y - h / 2);
-      ctx.lineTo(tr.x + tr.size / 2, tr.y + h / 2);
-      ctx.lineTo(tr.x - tr.size / 2, tr.y + h / 2);
-      ctx.closePath();
-      ctx.fill();
+      ctx.drawImage(pfpImage, dx, dy, dw, dh);
+    } else {
+      ctx.fillStyle = '#1e1c24';
+      ctx.fillRect(-LOGO_INNER_R, -LOGO_INNER_R, LOGO_INNER_R * 2, LOGO_INNER_R * 2);
     }
 
-    // Subtle inner edge shadow ring inside the pink circle
+    // Subtle inner edge shadow ring inside the circular frame
     const innerGrad = ctx.createRadialGradient(
       0,
       0,
-      LOGO_INNER_R * 0.82,
+      LOGO_INNER_R * 0.88,
       0,
       0,
       LOGO_INNER_R
     );
     innerGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    innerGrad.addColorStop(1, 'rgba(0, 0, 0, 0.16)');
+    innerGrad.addColorStop(1, 'rgba(0, 0, 0, 0.22)');
     ctx.fillStyle = innerGrad;
-    ctx.fillRect(-LOGO_INNER_R, -LOGO_INNER_R, LOGO_INNER_R * 2, LOGO_INNER_R * 2);
+    ctx.beginPath();
+    ctx.arc(0, 0, LOGO_INNER_R, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Outro dimming if track has ended
+    if (isDimmedOutro) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+      ctx.fillRect(-LOGO_INNER_R, -LOGO_INNER_R, LOGO_INNER_R * 2, LOGO_INNER_R * 2);
+    }
 
     ctx.restore();
-
-    // 5. White osu! Wordmark (using our sub-pixel Marching Squares contours)
-    const wp = getWordmarkPath();
-    if (wp) {
-      ctx.save();
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
-      ctx.shadowBlur = 4;
-      ctx.shadowOffsetY = 1.5;
-      ctx.fillStyle = isDimmedOutro ? '#e2dce0' : '#ffffff';
-      ctx.fill(wp, 'evenodd');
-      ctx.restore();
-    }
 
     ctx.restore();
   }
