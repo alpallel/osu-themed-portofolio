@@ -2,14 +2,9 @@
   'use strict';
 
   // --- Timing Constants from ppy/osu IntroTriangles.cs ---
-  const AUDIO_TRACK_URL = 'New osu!lazer intro _ cYsmix - triangles.mp3';
-
-  // In the recording, TrianglesIntroSequence t=0 is locked to 7150.0ms of the audio file
-  const SEQ_OFFSET_MS = 7150.0;
-  const DISCLAIMER_START_MS = 4150.0;
-  const DISCLAIMER_FADE_IN_MS = 250.0;
-  const DISCLAIMER_END_MS = 6800.0;
-  const DISCLAIMER_FADE_OUT_MS = 250.0;
+  // Audio is cut to begin right at the intro start (t=0ms)
+  const AUDIO_TRACK_URL = 'assets/audio.mp3';
+  const SEQ_OFFSET_MS = 0.0;
 
   const TEXT_1 = 200.0;          // "wel"
   const TEXT_2 = 400.0;          // "welcome"
@@ -22,12 +17,12 @@
   const LOGO_1 = 2080.0;         // LazerLogo start
   const LOGO_SCALE_DURATION = 920.0;
   const LOGO_2 = LOGO_1 + LOGO_SCALE_DURATION; // 3000.0ms (Flash + OsuLogo arrival at ~3030ms)
-  const DROP_SEQ_MS = 3030.0;    // Exact 60fps frame 191 (10180ms in audio)
+  const DROP_SEQ_MS = 3030.0;    // Drop occurs at 3030ms in intro audio
   const FLASH_DURATION = 1000.0;
 
   // Beatmap timing for cYsmix - triangles (160 BPM -> 375.0ms per beat)
   const BEAT_LENGTH_MS = 375.0;
-  const DROP_AUDIO_MS = SEQ_OFFSET_MS + DROP_SEQ_MS; // 10180.0ms
+  const DROP_AUDIO_MS = DROP_SEQ_MS; // 3030.0ms
 
   // Reference coordinate space (1280x720)
   const REF_W = 1280;
@@ -39,41 +34,27 @@
   // DOM Elements
   const canvas = document.getElementById('intro-canvas');
   const ctx = canvas.getContext('2d', { alpha: false });
-  const startOverlay = document.getElementById('start-overlay');
-  const btnStartIntro = document.getElementById('btn-start-intro');
-  const btnStartFull = document.getElementById('btn-start-full');
   const hudBar = document.getElementById('hud-bar');
-  const btnReplayIntro = document.getElementById('btn-replay-intro');
-  const btnReplayFull = document.getElementById('btn-replay-full');
+  const btnReplay = document.getElementById('btn-replay');
   const btnPlayPause = document.getElementById('btn-play-pause');
   const hudScrubber = document.getElementById('hud-scrubber');
   const hudTime = document.getElementById('hud-time');
 
-  // Load Clean Background Texture (extracted 1:1 from video without watermark)
+  // Loading Screen DOM Elements
+  const loadingScreen = document.getElementById('loading-screen');
+  const loadingBarFill = document.getElementById('loading-bar-fill');
+  const loadingStatus = document.getElementById('loading-status');
+  const loadingPercent = document.getElementById('loading-percent');
+
+  // Media & Texture Objects
   const bgImage = new Image();
   let bgLoaded = false;
-  bgImage.onload = () => {
-    bgLoaded = true;
-  };
-  bgImage.src = 'assets/blurred-bg.webp';
-  if (bgImage.complete && bgImage.naturalWidth > 0) {
-    bgLoaded = true;
-  }
 
-  // Load Profile Picture for Logo (replaces inner osu! logo inside the frame circle)
   const pfpImage = new Image();
   let pfpLoaded = false;
-  pfpImage.onload = () => {
-    pfpLoaded = true;
-  };
-  pfpImage.src = 'assets/pfp.jpeg';
-  if (pfpImage.complete && pfpImage.naturalWidth > 0) {
-    pfpLoaded = true;
-  }
 
   // Audio & Web Audio API Analyser
   const audio = new Audio();
-  audio.src = AUDIO_TRACK_URL;
   audio.preload = 'auto';
   audio.crossOrigin = 'anonymous';
 
@@ -91,6 +72,7 @@
   function initWebAudio() {
     if (audioCtx) return;
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
     audioCtx = new AudioContextClass();
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 1024;
@@ -147,11 +129,11 @@
     for (let t = TEXT_GLITCH; t < RULESETS_1; t += 22.0) {
       const outlineOnly = nextRng() >= 0.5;
       const size = (nextRng() + 0.2) * 80.0 * RATIO_720_768;
-      // Container centered at (640, 360) of size (420, 85), with OutlineTriangle Origin = TopLeft
+      // Container centered at (0, 0) of size (420, 90), with OutlineTriangle Origin = TopLeft
       const rx = nextRng();
       const ry = nextRng();
-      const x = REF_CX - 195 + rx * 390;
-      const y = REF_CY - 54 + ry * 90;
+      const x = -210 + rx * 420;
+      const y = -48 + ry * 96;
       glitchTriangles.push({
         spawnTime: t,
         outlineOnly,
@@ -241,102 +223,11 @@
 
   // --- Helper: Check if Audio Time is in Kiai Mode (cYsmix - triangles) ---
   function isKiaiTime(audioMs) {
-    // In triangles.osz, Kiai chorus runs 94000ms..104500ms and 106000ms..118000ms (plus early mini-kiai 22000..33500)
+    // In triangles.osz (cut audio), Kiai chorus runs 86800ms..97300ms and 98800ms..110850ms
     return (
-      (audioMs >= 93950 && audioMs <= 104450) ||
-      (audioMs >= 105950 && audioMs <= 118000)
+      (audioMs >= 86800 && audioMs <= 97300) ||
+      (audioMs >= 98800 && audioMs <= 110850)
     );
-  }
-
-  // --- Phase 0: Draw Disclaimer Screen (4150ms .. 7050ms) ---
-  function drawDisclaimer(audioMs, scale) {
-    if (audioMs < DISCLAIMER_START_MS || audioMs > DISCLAIMER_END_MS + DISCLAIMER_FADE_OUT_MS) {
-      return;
-    }
-    let alpha = 1.0;
-    if (audioMs < DISCLAIMER_START_MS + DISCLAIMER_FADE_IN_MS) {
-      alpha = clamp((audioMs - DISCLAIMER_START_MS) / DISCLAIMER_FADE_IN_MS, 0, 1);
-    } else if (audioMs > DISCLAIMER_END_MS) {
-      alpha = clamp(1.0 - (audioMs - DISCLAIMER_END_MS) / DISCLAIMER_FADE_OUT_MS, 0, 1);
-    }
-    if (alpha <= 0.001) return;
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.translate(viewW / 2, viewH / 2);
-    ctx.scale(scale, scale);
-
-    // Warning triangle at (0, -78)
-    const triY = -78;
-    const triH = 26;
-    const triW = 30;
-    ctx.fillStyle = '#f5d142';
-    ctx.beginPath();
-    ctx.moveTo(0, triY - triH / 2);
-    ctx.lineTo(triW / 2, triY + triH / 2);
-    ctx.lineTo(-triW / 2, triY + triH / 2);
-    ctx.closePath();
-    ctx.fill();
-
-    // Exclamation mark inside warning triangle
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(-1.5, triY - 4, 3, 9);
-    ctx.fillRect(-1.5, triY + 7, 3, 3);
-
-    // Text lines
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    // "This is an early development build"
-    ctx.font = '300 23px "Torus", "Quicksand", sans-serif';
-    const part1 = 'This is an ';
-    const part2 = 'early development build';
-    const w1 = ctx.measureText(part1).width;
-    ctx.font = '700 23px "Torus", "Quicksand", sans-serif';
-    const w2 = ctx.measureText(part2).width;
-    const totalW = w1 + w2;
-
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'left';
-    ctx.font = '300 23px "Torus", "Quicksand", sans-serif';
-    ctx.fillText(part1, -totalW / 2, -31);
-    ctx.font = '700 23px "Torus", "Quicksand", sans-serif';
-    ctx.fillText(part2, -totalW / 2 + w1, -31);
-
-    ctx.textAlign = 'center';
-    ctx.font = '400 15.5px "Torus", "Quicksand", sans-serif';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
-    ctx.fillText('Things may not work as expected', 0, -4);
-
-    ctx.font = '400 11.5px "Torus", "Quicksand", sans-serif';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.fillText('Detailed bug reports are welcomed via github issues.', 0, 26);
-
-    // "Visit discord.gg/ppy to help out or follow progress!"
-    const d1 = 'Visit ';
-    const d2 = 'discord.gg/ppy';
-    const d3 = ' to help out or follow progress!';
-    const dw1 = ctx.measureText(d1).width;
-    const dw2 = ctx.measureText(d2).width;
-    const dw3 = ctx.measureText(d3).width;
-    const dTotal = dw1 + dw2 + dw3;
-    ctx.textAlign = 'left';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.fillText(d1, -dTotal / 2, 42);
-    ctx.fillStyle = '#58b4f5';
-    ctx.fillText(d2, -dTotal / 2 + dw1, 42);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.fillText(d3, -dTotal / 2 + dw1 + dw2, 42);
-
-    // "Thank you for supporting osu! ♥"
-    ctx.textAlign = 'center';
-    ctx.font = '600 11.5px "Torus", "Quicksand", sans-serif';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText('Thank you for supporting osu! ', -6, 80);
-    ctx.fillStyle = '#e866a0';
-    ctx.fillText('♥', 82, 80);
-
-    ctx.restore();
   }
 
   // --- Phase 1: welcomeText + GlitchingTriangles (t_seq in [200, 1450]) ---
@@ -651,10 +542,10 @@
   }
 
   function drawBackgroundAndSideFlashes(audioMs, scale) {
-    // Outro background fade-out: in video, background fades to black between 132.4s and 133.0s
+    // Outro background fade-out: in video, background fades to black between 125.25s and 125.85s
     let bgAlpha = 1.0;
-    if (audioMs >= 132400) {
-      bgAlpha = clamp(1.0 - (audioMs - 132400) / 600.0, 0, 1);
+    if (audioMs >= 125250) {
+      bgAlpha = clamp(1.0 - (audioMs - 125250) / 600.0, 0, 1);
     }
     if (bgAlpha <= 0.001) return;
 
@@ -680,7 +571,7 @@
     }
 
     // MenuSideFlashes (osu.Game/Screens/Menu/MenuSideFlashes.cs)
-    if (audioMs >= DROP_AUDIO_MS && audioMs < 131000) {
+    if (audioMs >= DROP_AUDIO_MS && audioMs < 123850) {
       const sinceDrop = audioMs - DROP_AUDIO_MS;
       const beatIndex = Math.floor(sinceDrop / BEAT_LENGTH_MS);
       const beatPhase = (sinceDrop % BEAT_LENGTH_MS) / BEAT_LENGTH_MS; // 0..1 within current beat
@@ -731,13 +622,12 @@
   }
 
   function drawOsuLogo(audioMs, dtMs, scale, audioMetrics) {
-    // Outro fade/shrink at end of video (133.0s..134.8s)
+    // Outro fade/shrink at end of video
     let logoAlpha = 1.0;
     let outroScale = 1.0;
-    if (audioMs >= 132600) {
-      // Between 132.6s and 134.0s logo dims to ~0.72 brightness, then shrinks & fades out at 134.1s..134.8s
-      if (audioMs >= 134100) {
-        const p = clamp((audioMs - 134100) / 600.0, 0, 1);
+    if (audioMs >= 125450) {
+      if (audioMs >= 126950) {
+        const p = clamp((audioMs - 126950) / 600.0, 0, 1);
         logoAlpha = 1.0 - easeOutQuad(p);
         outroScale = 1.0 - 0.25 * easeInQuad(p);
       }
@@ -751,7 +641,7 @@
     const kiai = isKiaiTime(audioMs);
 
     // Spawn ripple on new beat (when music is active)
-    if (audioMs >= DROP_AUDIO_MS && audioMs < 130500) {
+    if (audioMs >= DROP_AUDIO_MS && audioMs < 123350) {
       if (beatIndex !== lastBeatIndex) {
         lastBeatIndex = beatIndex;
         if (kiai || beatIndex % 2 === 0) {
@@ -766,7 +656,7 @@
 
     // Calculate BeatSyncedContainer scale (OnNewBeat in OsuLogo.cs)
     let beatScale = 1.0;
-    if (audioMs >= DROP_AUDIO_MS && audioMs < 130800) {
+    if (audioMs >= DROP_AUDIO_MS && audioMs < 123650) {
       const ampBoost = kiai ? 0.055 : 0.036;
       const attackMs = BEAT_LENGTH_MS * 0.14;
       if (beatTimeMs < attackMs) {
@@ -817,7 +707,7 @@
     }
 
     // 2. Draw LogoVisualisation (bars around perimeter at r = 214px)
-    if (BARS_PER_VISUALISER > 0 && TOTAL_BARS > 0 && audioMs >= DROP_AUDIO_MS && audioMs < 132500) {
+    if (BARS_PER_VISUALISER > 0 && TOTAL_BARS > 0 && audioMs >= DROP_AUDIO_MS && audioMs < 125350) {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = 'rgba(255, 255, 255, 0.34)';
@@ -840,7 +730,7 @@
     }
 
     // 3. Outer Shadow behind White Frame Circle (Outer Radius = 215.5px)
-    const isDimmedOutro = audioMs >= 132600;
+    const isDimmedOutro = audioMs >= 125450;
     ctx.save();
     ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
     ctx.shadowBlur = 28;
@@ -954,9 +844,7 @@
     const audioMetrics = updateAudioAnalysis(audioMs, dtMs);
 
     // Render active phase(s)
-    if (audioMs < SEQ_OFFSET_MS) {
-      drawDisclaimer(audioMs, refScale);
-    } else if (tSeq < DROP_SEQ_MS) {
+    if (tSeq < DROP_SEQ_MS) {
       drawWelcomeAndTriangles(tSeq, refScale);
       drawRulesets(tSeq, refScale);
       drawLazerLogo(tSeq, refScale);
@@ -968,13 +856,12 @@
   }
 
   // --- Playback Controls & Interaction ---
-  function startPlayback(startAtMs) {
+  function startPlayback(startAtMs = 0) {
     initWebAudio();
     if (audioCtx && audioCtx.state === 'suspended') {
       audioCtx.resume();
     }
     isStarted = true;
-    startOverlay.classList.add('hidden');
     ripples = [];
     lastBeatIndex = -1;
     barAmplitudes.fill(0);
@@ -982,36 +869,34 @@
     audio.currentTime = startAtMs / 1000.0;
     lastAudioCurrentTime = audio.currentTime;
     lastPerfTime = performance.now();
-    audio.play().then(() => {
-      btnPlayPause.textContent = 'Pause';
-    }).catch(() => {
-      // Fallback if autoplay blocked
-      startOverlay.classList.remove('hidden');
-    });
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          btnPlayPause.textContent = 'Pause';
+        })
+        .catch(() => {
+          // If browser autoplay policy blocks unmuted audio on load,
+          // resume immediately on the first click or keypress anywhere
+          const unlock = () => {
+            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+            audio.play().then(() => {
+              btnPlayPause.textContent = 'Pause';
+            });
+            window.removeEventListener('pointerdown', unlock);
+            window.removeEventListener('keydown', unlock);
+          };
+          window.addEventListener('pointerdown', unlock, { once: true });
+          window.addEventListener('keydown', unlock, { once: true });
+        });
+    }
   }
 
-  btnStartIntro.addEventListener('click', (e) => {
-    e.stopPropagation();
-    // Start right at the TrianglesIntroSequence (7.12s -> 30ms lead-in before t_seq=0)
-    startPlayback(7120.0);
-  });
-
-  btnStartFull.addEventListener('click', (e) => {
-    e.stopPropagation();
-    // Start at the Disclaimer screen (4.10s)
-    startPlayback(4100.0);
-  });
-
-  startOverlay.addEventListener('click', () => {
-    startPlayback(7120.0);
-  });
-
-  btnReplayIntro.addEventListener('click', () => startPlayback(7120.0));
-  btnReplayFull.addEventListener('click', () => startPlayback(4100.0));
+  btnReplay.addEventListener('click', () => startPlayback(0));
 
   btnPlayPause.addEventListener('click', () => {
     if (!isStarted) {
-      startPlayback(7120.0);
+      startPlayback(0);
       return;
     }
     if (audio.paused) {
@@ -1079,17 +964,8 @@
   });
 
   window.addEventListener('keydown', (e) => {
-    if (!isStarted) {
-      if (e.code === 'Space' || e.code === 'Enter') {
-        e.preventDefault();
-        startPlayback(7120.0);
-      }
-      return;
-    }
     if (e.code === 'KeyR') {
-      startPlayback(7120.0);
-    } else if (e.code === 'KeyD') {
-      startPlayback(4100.0);
+      startPlayback(0);
     } else if (e.code === 'Space') {
       e.preventDefault();
       btnPlayPause.click();
@@ -1098,26 +974,200 @@
     }
   });
 
-  // Attempt immediate autoplay if browser permits
-  window.addEventListener('DOMContentLoaded', () => {
-    requestAnimationFrame(renderFrame);
-    audio.currentTime = 7.12;
-    const playPromise = audio.play();
-    if (playPromise !== undefined) {
-      playPromise
-        .then(() => {
-          initWebAudio();
-          isStarted = true;
-          startOverlay.classList.add('hidden');
-          lastAudioCurrentTime = audio.currentTime;
-          lastPerfTime = performance.now();
-        })
-        .catch(() => {
-          // Browser requires user interaction before playing unmuted audio
-          audio.pause();
-          audio.currentTime = 7.12;
-        });
+  // --- Asset Preloader (Streams bytes to drive 0%..100% progress) ---
+  async function preloadAllAssets(onProgress) {
+    const assets = [
+      { id: 'audio', url: AUDIO_TRACK_URL, size: 5176574, label: 'audio track' },
+      { id: 'pfp', url: 'assets/pfp.jpeg', size: 3274974, label: 'avatar profile picture' },
+      { id: 'bg', url: 'assets/blurred-bg.webp', size: 42522, label: 'background texture' }
+    ];
+
+    const totalBytes = assets.reduce((sum, a) => sum + a.size, 0);
+    const loadedBytes = { audio: 0, pfp: 0, bg: 0 };
+
+    function report(assetId, received, label) {
+      loadedBytes[assetId] = received;
+      const sum = Object.values(loadedBytes).reduce((a, b) => a + b, 0);
+      onProgress(Math.min(1.0, sum / totalBytes), label);
     }
-  });
+
+    async function fetchAssetBlob(asset) {
+      try {
+        const res = await fetch(asset.url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const expected = +(res.headers.get('content-length') || asset.size);
+
+        if (res.body && res.body.getReader) {
+          const reader = res.body.getReader();
+          const chunks = [];
+          let received = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            received += value.length;
+            report(asset.id, received, asset.label);
+          }
+          report(asset.id, expected, asset.label);
+          return new Blob(chunks);
+        } else {
+          const blob = await res.blob();
+          report(asset.id, expected, asset.label);
+          return blob;
+        }
+      } catch (err) {
+        console.warn(`Preload fallback for ${asset.url}:`, err);
+        report(asset.id, asset.size, asset.label);
+        return null;
+      }
+    }
+
+    // Download assets in parallel
+    const [audioBlob, pfpBlob, bgBlob] = await Promise.all([
+      fetchAssetBlob(assets[0]),
+      fetchAssetBlob(assets[1]),
+      fetchAssetBlob(assets[2])
+    ]);
+
+    // Setup audio source
+    if (audioBlob) {
+      audio.src = URL.createObjectURL(audioBlob);
+    } else {
+      audio.src = AUDIO_TRACK_URL;
+    }
+
+    // Decode profile picture
+    const pfpPromise = new Promise((resolve) => {
+      pfpImage.onload = async () => {
+        pfpLoaded = true;
+        if (pfpImage.decode) {
+          try { await pfpImage.decode(); } catch (_) {}
+        }
+        resolve();
+      };
+      pfpImage.onerror = () => resolve();
+      pfpImage.src = pfpBlob ? URL.createObjectURL(pfpBlob) : 'assets/pfp.jpeg';
+      if (pfpImage.complete && pfpImage.naturalWidth > 0) {
+        pfpLoaded = true;
+        resolve();
+      }
+    });
+
+    // Decode background
+    const bgPromise = new Promise((resolve) => {
+      bgImage.onload = async () => {
+        bgLoaded = true;
+        if (bgImage.decode) {
+          try { await bgImage.decode(); } catch (_) {}
+        }
+        resolve();
+      };
+      bgImage.onerror = () => resolve();
+      bgImage.src = bgBlob ? URL.createObjectURL(bgBlob) : 'assets/blurred-bg.webp';
+      if (bgImage.complete && bgImage.naturalWidth > 0) {
+        bgLoaded = true;
+        resolve();
+      }
+    });
+
+    // Ensure audio can play through
+    const audioReadyPromise = new Promise((resolve) => {
+      if (audio.readyState >= 3) {
+        resolve();
+      } else {
+        const onReady = () => {
+          audio.removeEventListener('canplaythrough', onReady);
+          audio.removeEventListener('loadeddata', onReady);
+          resolve();
+        };
+        audio.addEventListener('canplaythrough', onReady, { once: true });
+        audio.addEventListener('loadeddata', onReady, { once: true });
+        setTimeout(resolve, 2000);
+        audio.load();
+      }
+    });
+
+    const fontsPromise = (document.fonts && document.fonts.ready)
+      ? document.fonts.ready
+      : Promise.resolve();
+
+    await Promise.all([pfpPromise, bgPromise, audioReadyPromise, fontsPromise]);
+  }
+
+  // --- App Startup with osu!lazer Loading Screen ---
+  async function startApp() {
+    let targetProgress = 0;
+    let currentProgress = 0;
+    let currentLabel = 'loading assets...';
+    let isComplete = false;
+
+    // Smooth progress interpolation loop
+    let progressAnimId = null;
+    function updateProgressUI() {
+      if (!isComplete || currentProgress < 0.999) {
+        progressAnimId = requestAnimationFrame(updateProgressUI);
+      }
+      currentProgress += (targetProgress - currentProgress) * 0.14;
+      if (isComplete && Math.abs(1.0 - currentProgress) < 0.005) {
+        currentProgress = 1.0;
+      }
+
+      if (loadingBarFill) {
+        loadingBarFill.style.width = (currentProgress * 100).toFixed(1) + '%';
+      }
+      if (loadingPercent) {
+        loadingPercent.textContent = Math.round(currentProgress * 100) + '%';
+      }
+      if (loadingStatus) {
+        loadingStatus.textContent = currentLabel;
+      }
+    }
+    progressAnimId = requestAnimationFrame(updateProgressUI);
+
+    // Preload all assets
+    await preloadAllAssets((ratio, label) => {
+      targetProgress = Math.max(targetProgress, ratio);
+      currentLabel = label ? `loading ${label}...` : 'loading assets...';
+    });
+
+    targetProgress = 1.0;
+    isComplete = true;
+    currentLabel = 'ready!';
+
+    // Wait until progress bar visually reaches 100%
+    while (currentProgress < 0.99) {
+      await new Promise((r) => setTimeout(r, 16));
+    }
+    currentProgress = 1.0;
+    if (loadingBarFill) loadingBarFill.style.width = '100%';
+    if (loadingPercent) loadingPercent.textContent = '100%';
+    if (loadingStatus) loadingStatus.textContent = 'ready!';
+
+    // Brief polish hold (220ms) so 100% state is perceived
+    await new Promise((r) => setTimeout(r, 220));
+
+    // Fade out loading screen smoothly
+    if (loadingScreen) {
+      loadingScreen.classList.add('fade-out');
+    }
+
+    // Start intro immediately without requiring user to press screen
+    requestAnimationFrame(renderFrame);
+    startPlayback(0);
+
+    // Cleanup loading elements after transition
+    setTimeout(() => {
+      if (progressAnimId) cancelAnimationFrame(progressAnimId);
+      if (loadingScreen) {
+        loadingScreen.style.display = 'none';
+      }
+    }, 600);
+  }
+
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', startApp);
+  } else {
+    startApp();
+  }
 })();
 

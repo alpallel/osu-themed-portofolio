@@ -7,34 +7,27 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main id="stage-viewport">
-    <canvas id="intro-canvas" aria-label="osu!lazer triangles intro"></canvas>
-  </main>
-
-  <!-- Shown only if browser blocks unmuted autoplay before first interaction -->
-  <div id="start-overlay" role="button" tabindex="0" aria-label="Click to launch osu!lazer intro">
-    <div class="launch-ring" aria-hidden="true"></div>
-    <div class="launch-prompt">
-      <div class="launch-title">click anywhere to launch</div>
-      <div class="launch-subtitle">cYsmix — triangles · 1:1 osu!lazer intro</div>
-      <div class="launch-modes">
-        <button id="btn-start-intro" class="mode-btn primary" type="button">
-          Launch Intro (0:07.15)
-        </button>
-        <button id="btn-start-full" class="mode-btn" type="button">
-          Full Sequence w/ Pre-Launch (0:04.10)
-        </button>
+  <!-- osu!lazer Themed Loading Screen -->
+  <div id="loading-screen" aria-label="Loading assets">
+    <div class="loading-content">
+      <div class="loading-bar-wrap">
+        <div id="loading-bar-fill" class="loading-bar-fill"></div>
+      </div>
+      <div class="loading-status-wrap">
+        <span id="loading-status" class="loading-status">loading assets...</span>
+        <span id="loading-percent" class="loading-percent">0%</span>
       </div>
     </div>
   </div>
 
+  <main id="stage-viewport">
+    <canvas id="intro-canvas" aria-label="osu!lazer triangles intro"></canvas>
+  </main>
+
   <!-- Auto-hiding transport HUD (top-right hover or press H) -->
   <nav id="hud-bar" aria-label="Playback controls">
-    <button id="btn-replay-intro" class="hud-btn" type="button" title="Replay Triangles Intro (R)">
-      Replay Intro
-    </button>
-    <button id="btn-replay-full" class="hud-btn" type="button" title="Replay Full Sequence (D)">
-      Full Sequence
+    <button id="btn-replay" class="hud-btn" type="button" title="Replay Intro (R)">
+      Replay
     </button>
     <button id="btn-play-pause" class="hud-btn" type="button" title="Play / Pause (Space)">
       Pause
