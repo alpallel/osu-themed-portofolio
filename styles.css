@@ -19,16 +19,24 @@
   -webkit-user-select: none;
 }
 
+html {
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 html,
 body {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   background-color: var(--bg-black);
   font-family: 'Torus', 'Quicksand', 'Comfortaa', system-ui, -apple-system, sans-serif;
   color: var(--text-white);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #stage-viewport {
@@ -36,6 +44,7 @@ body {
   inset: 0;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   background: #000000;
   display: flex;
   align-items: center;
@@ -47,6 +56,7 @@ body {
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: manipulation;
 }
 
 /* osu!lazer Themed Loading Screen */
@@ -54,11 +64,17 @@ body {
   position: fixed;
   inset: 0;
   z-index: 100;
+  height: 100vh;
+  height: 100dvh;
+  padding: 24px 20px;
+  padding-top: calc(24px + env(safe-area-inset-top));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
   background: #000000;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  touch-action: manipulation;
   transition: opacity 0.55s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -200,8 +216,8 @@ body {
 /* Auto-hiding minimal transport HUD for testing / scrubbing / replaying */
 #hud-bar {
   position: fixed;
-  top: 14px;
-  right: 16px;
+  top: calc(14px + env(safe-area-inset-top));
+  right: calc(16px + env(safe-area-inset-right));
   z-index: 15;
   display: flex;
   align-items: center;
@@ -210,6 +226,7 @@ body {
   border-radius: 8px;
   background: rgba(10, 14, 20, 0.72);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   opacity: 0;
   transform: translateY(-4px);
@@ -244,10 +261,50 @@ body {
 }
 
 #hud-scrubber {
+  -webkit-appearance: none;
+  appearance: none;
   width: 120px;
-  height: 4px;
+  height: 20px;
+  background: transparent;
   accent-color: #ffffff;
   cursor: pointer;
+}
+
+#hud-scrubber::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+#hud-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: none;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+#hud-scrubber::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+#hud-scrubber::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+#hud-scrubber:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 2px;
+  border-radius: 999px;
 }
 
 #hud-time {
@@ -256,5 +313,87 @@ body {
   color: rgba(255, 255, 255, 0.65);
   min-width: 82px;
   text-align: right;
+}
+
+/* --- Mobile / touch layout --- */
+@media (max-width: 700px) {
+  .loading-content {
+    gap: 18px;
+  }
+
+  .loading-status,
+  .loading-percent {
+    font-size: 13px;
+  }
+
+  #hud-bar {
+    top: calc(10px + env(safe-area-inset-top));
+    right: calc(10px + env(safe-area-inset-right));
+    left: calc(10px + env(safe-area-inset-left));
+    max-width: none;
+    padding: 8px 10px;
+    border-radius: 12px;
+    gap: 10px;
+  }
+
+  .hud-btn {
+    min-height: 36px;
+    padding: 6px 12px;
+    font-size: 12px;
+    border-radius: 6px;
+  }
+
+  #hud-scrubber {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 48px;
+    height: 28px;
+  }
+
+  #hud-scrubber::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -6px;
+  }
+
+  #hud-scrubber::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+  }
+
+  #hud-time {
+    min-width: 0;
+    font-size: 12px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .hud-btn {
+    min-height: 36px;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  #hud-scrubber {
+    height: 28px;
+  }
+
+  #hud-scrubber::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -6px;
+  }
+
+  #hud-scrubber::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+@media (max-width: 360px) {
+  .hud-btn {
+    padding: 6px 9px;
+    font-size: 11px;
+  }
 }
 

@@ -35,6 +35,7 @@
   const BACKGROUND_DIM = 0.5;
 
   // DOM Elements
+  const stageViewport = document.getElementById('stage-viewport');
   const canvas = document.getElementById('intro-canvas');
   const ctx = canvas.getContext('2d', { alpha: false });
   const hudBar = document.getElementById('hud-bar');
@@ -205,19 +206,38 @@
   let clickScaleBoost = 0.0;
 
   // --- Resize Handling ---
-  let viewW = window.innerWidth;
-  let viewH = window.innerHeight;
-  let dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  let viewW = 0;
+  let viewH = 0;
+  let dpr = 1;
 
   function handleResize() {
-    viewW = window.innerWidth;
-    viewH = window.innerHeight;
-    dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const rect = stageViewport.getBoundingClientRect();
+    const nextW = Math.max(1, Math.round(rect.width) || window.innerWidth);
+    const nextH = Math.max(1, Math.round(rect.height) || window.innerHeight);
+    const nextDpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    if (nextW === viewW && nextH === viewH && nextDpr === dpr && canvas.width > 0) return;
+
+    viewW = nextW;
+    viewH = nextH;
+    dpr = nextDpr;
     canvas.width = Math.round(viewW * dpr);
     canvas.height = Math.round(viewH * dpr);
   }
   window.addEventListener('resize', handleResize);
+  window.addEventListener('orientationchange', () => setTimeout(handleResize, 150));
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', handleResize);
+  }
   handleResize();
+
+  // Portrait screens get a larger scale so the menu logo stays the focal point
+  // instead of shrinking to a thin strip in the middle of the screen.
+  function getRefScale() {
+    if (viewH > viewW) {
+      return Math.min(viewW / 700, viewH / 900);
+    }
+    return Math.min(viewW / REF_W, viewH / REF_H);
+  }
 
   // --- Pre-build Path2D for the Solid osu! Wordmark from window.OSU_LOGO_DATA ---
   let wordmarkPath = null;
@@ -861,7 +881,7 @@
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, viewW, viewH);
 
-    const refScale = Math.min(viewW / REF_W, viewH / REF_H);
+    const refScale = getRefScale();
 
     // Update FFT visualizer & amplitude metrics
     const audioMetrics = updateAudioAnalysis(audioMs, dtMs);
@@ -1024,33 +1044,70 @@
     isScrubbing = false;
   });
 
-  // Auto-show HUD briefly when cursor moves near top-right corner
+  // Auto-show HUD briefly near the top-right corner (hover on desktop, tap on touch)
   let hudTimeout = null;
-  window.addEventListener('mousemove', (e) => {
-    mouseX = (e.clientX / Math.max(1, viewW)) * 2 - 1;
-    mouseY = (e.clientY / Math.max(1, viewH)) * 2 - 1;
 
-    // Check if hovering OsuLogo
-    const refScale = Math.min(viewW / REF_W, viewH / REF_H);
-    const dx = e.clientX - viewW / 2;
-    const dy = e.clientY - viewH / 2;
-    isHoveringLogo = Math.hypot(dx, dy) <= LOGO_OUTER_R * refScale;
+  function revealHud(durationMs = 2600) {
+    hudBar.classList.add('visible');
+    clearTimeout(hudTimeout);
+    hudTimeout = setTimeout(() => {
+      hudBar.classList.remove('visible');
+    }, durationMs);
+  }
+
+  function isInHudHotspot(clientX, clientY) {
+    const hotspotWidth = Math.min(420, viewW * 0.55);
+    return clientY < 100 && clientX > viewW - hotspotWidth;
+  }
+
+  function updateHoverState(clientX, clientY) {
+    mouseX = (clientX / Math.max(1, viewW)) * 2 - 1;
+    mouseY = (clientY / Math.max(1, viewH)) * 2 - 1;
+
+    const dx = clientX - viewW / 2;
+    const dy = clientY - viewH / 2;
+    isHoveringLogo = Math.hypot(dx, dy) <= LOGO_OUTER_R * getRefScale();
     canvas.style.cursor =
       isStarted && getExactAudioTimeMs() >= DROP_AUDIO_MS && isHoveringLogo
         ? 'pointer'
         : 'default';
+  }
 
-    if (e.clientY < 85 && e.clientX > viewW - 420) {
-      hudBar.classList.add('visible');
-      clearTimeout(hudTimeout);
-      hudTimeout = setTimeout(() => {
-        hudBar.classList.remove('visible');
-      }, 2600);
+  window.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch') return;
+    updateHoverState(e.clientX, e.clientY);
+    if (isInHudHotspot(e.clientX, e.clientY)) {
+      revealHud();
     }
   });
 
-  canvas.addEventListener('mousedown', () => {
-    if (isStarted && getExactAudioTimeMs() >= DROP_AUDIO_MS && isHoveringLogo) {
+  window.addEventListener('pointerdown', (e) => {
+    if (!isStarted || hudBar.contains(e.target)) return;
+
+    if (isInHudHotspot(e.clientX, e.clientY)) {
+      if (e.pointerType === 'mouse') {
+        revealHud();
+      } else if (hudBar.classList.contains('visible')) {
+        clearTimeout(hudTimeout);
+        hudBar.classList.remove('visible');
+      } else {
+        revealHud(4000);
+      }
+      return;
+    }
+
+    // Tapping anywhere else dismisses the touch HUD.
+    if (e.pointerType !== 'mouse' && hudBar.classList.contains('visible')) {
+      clearTimeout(hudTimeout);
+      hudBar.classList.remove('visible');
+    }
+  });
+
+  canvas.addEventListener('pointerdown', (e) => {
+    const dx = e.clientX - viewW / 2;
+    const dy = e.clientY - viewH / 2;
+    const onLogo = Math.hypot(dx, dy) <= LOGO_OUTER_R * getRefScale();
+    if (isStarted && getExactAudioTimeMs() >= DROP_AUDIO_MS && onLogo) {
       clickScaleBoost = 0.065;
       ripples.push({
         spawnMs: getExactAudioTimeMs(),
@@ -1244,13 +1301,19 @@
     await new Promise((r) => setTimeout(r, 220));
 
     // Require one interaction so the browser permits unmuted audio playback.
-    currentLabel = 'click anywhere to start';
+    const touchFirst = window.matchMedia('(hover: none), (pointer: coarse)').matches;
+    currentLabel = touchFirst ? 'tap anywhere to start' : 'click anywhere to start';
     if (loadingStatus) loadingStatus.textContent = currentLabel;
     if (loadingScreen) {
       loadingScreen.classList.add('awaiting-start');
       loadingScreen.setAttribute('role', 'button');
       loadingScreen.setAttribute('tabindex', '0');
-      loadingScreen.setAttribute('aria-label', 'Click anywhere or press Enter to start the intro');
+      loadingScreen.setAttribute(
+        'aria-label',
+        touchFirst
+          ? 'Tap anywhere to start the intro'
+          : 'Click anywhere or press Enter to start the intro'
+      );
     }
 
     await new Promise((resolve) => {
@@ -1269,6 +1332,9 @@
         // Must run inside the gesture handler so audio can start unmuted.
         requestAnimationFrame(renderFrame);
         startPlayback(0);
+
+        // On touch screens there is no hover, so surface the controls once after the drop.
+        if (touchFirst) setTimeout(() => revealHud(2800), 4200);
 
         if (loadingScreen) {
           loadingScreen.classList.remove('awaiting-start');
