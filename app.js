@@ -31,6 +31,9 @@
   const REF_CY = 360;
   const RATIO_720_768 = 720 / 768; // 0.9375 (osu!framework 768p -> 720p scale)
 
+  // Background dim level for the main menu background (0 = no dim, 1 = black)
+  const BACKGROUND_DIM = 0.5;
+
   // DOM Elements
   const canvas = document.getElementById('intro-canvas');
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -582,6 +585,12 @@
         drawW,
         drawH
       );
+    }
+
+    // Background dim overlay (kept under the side flashes and logo)
+    if (BACKGROUND_DIM > 0) {
+      ctx.fillStyle = `rgba(0, 0, 0, ${BACKGROUND_DIM})`;
+      ctx.fillRect(0, 0, viewW, viewH);
     }
 
     // MenuSideFlashes (osu.Game/Screens/Menu/MenuSideFlashes.cs)
