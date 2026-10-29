@@ -63,11 +63,18 @@
   let freqData = null;
   let timeDomainData = null;
   let isStarted = false;
+  let isPlaybackRunning = false;
   let isScrubbing = false;
 
   // High-precision interpolated audio clock
   let lastAudioCurrentTime = 0;
   let lastPerfTime = performance.now();
+
+  // Wall-clock fallback used when browser autoplay policy blocks audio
+  let pausedPositionMs = 0;
+  let fallbackClockStartMs = 0;
+  let fallbackClockStartPerf = performance.now();
+  let audioUnlockAttached = false;
 
   function initWebAudio() {
     if (audioCtx) return;
@@ -85,18 +92,25 @@
   }
 
   function getExactAudioTimeMs() {
-    if (audio.paused || isScrubbing) {
+    if (isScrubbing) {
       return audio.currentTime * 1000.0;
     }
-    const rawTime = audio.currentTime;
-    const now = performance.now();
-    if (rawTime !== lastAudioCurrentTime) {
-      lastAudioCurrentTime = rawTime;
-      lastPerfTime = now;
-      return rawTime * 1000.0;
+    if (!isPlaybackRunning) {
+      return pausedPositionMs;
     }
-    const delta = Math.min(35.0, now - lastPerfTime);
-    return rawTime * 1000.0 + delta;
+    if (!audio.paused) {
+      const rawTime = audio.currentTime;
+      const now = performance.now();
+      if (rawTime !== lastAudioCurrentTime) {
+        lastAudioCurrentTime = rawTime;
+        lastPerfTime = now;
+        return rawTime * 1000.0;
+      }
+      const delta = Math.min(35.0, now - lastPerfTime);
+      return rawTime * 1000.0 + delta;
+    }
+    // Audio is blocked by autoplay policy: keep the intro moving on a wall clock.
+    return fallbackClockStartMs + (performance.now() - fallbackClockStartPerf);
   }
 
   // --- Easing Functions (osu!framework math) ---
@@ -856,19 +870,54 @@
   }
 
   // --- Playback Controls & Interaction ---
-  function startPlayback(startAtMs = 0) {
-    initWebAudio();
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-    isStarted = true;
-    ripples = [];
-    lastBeatIndex = -1;
-    barAmplitudes.fill(0);
-
-    audio.currentTime = startAtMs / 1000.0;
+  function syncPlaybackClock(positionMs) {
+    pausedPositionMs = positionMs;
+    fallbackClockStartMs = positionMs;
+    fallbackClockStartPerf = performance.now();
     lastAudioCurrentTime = audio.currentTime;
     lastPerfTime = performance.now();
+  }
+
+  function pausePlayback() {
+    if (!isPlaybackRunning) return;
+    pausedPositionMs = getExactAudioTimeMs();
+    isPlaybackRunning = false;
+    audio.pause();
+    btnPlayPause.textContent = 'Play';
+  }
+
+  function removeAudioUnlockListeners() {
+    window.removeEventListener('pointerdown', unlockAudioPlayback);
+    window.removeEventListener('keydown', unlockAudioPlayback);
+    audioUnlockAttached = false;
+  }
+
+  function attachAudioUnlockListeners() {
+    if (audioUnlockAttached) return;
+    audioUnlockAttached = true;
+    window.addEventListener('pointerdown', unlockAudioPlayback, { once: true });
+    window.addEventListener('keydown', unlockAudioPlayback, { once: true });
+  }
+
+  function unlockAudioPlayback() {
+    removeAudioUnlockListeners();
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+
+    audio.muted = false;
+    if (!isPlaybackRunning) return;
+
+    const positionMs = getExactAudioTimeMs();
+    fallbackClockStartMs = positionMs;
+    fallbackClockStartPerf = performance.now();
+
+    if (audio.paused) {
+      audio.currentTime = positionMs / 1000.0;
+      lastAudioCurrentTime = audio.currentTime;
+      lastPerfTime = performance.now();
+    }
+
     const playPromise = audio.play();
     if (playPromise !== undefined) {
       playPromise
@@ -876,20 +925,65 @@
           btnPlayPause.textContent = 'Pause';
         })
         .catch(() => {
-          // If browser autoplay policy blocks unmuted audio on load,
-          // resume immediately on the first click or keypress anywhere
-          const unlock = () => {
-            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-            audio.play().then(() => {
-              btnPlayPause.textContent = 'Pause';
-            });
-            window.removeEventListener('pointerdown', unlock);
-            window.removeEventListener('keydown', unlock);
-          };
-          window.addEventListener('pointerdown', unlock, { once: true });
-          window.addEventListener('keydown', unlock, { once: true });
+          // Audible playback still refused; restore muted playback so the intro keeps running.
+          audio.muted = true;
+          const retry = audio.play();
+          if (retry !== undefined) retry.catch(() => {});
+          attachAudioUnlockListeners();
         });
     }
+  }
+
+  audio.addEventListener('pause', () => {
+    if (!isPlaybackRunning || audio.ended) return;
+    // Browser paused the audio (e.g. after refusing an unmute): keep visuals moving.
+    fallbackClockStartMs = audio.currentTime * 1000.0;
+    fallbackClockStartPerf = performance.now();
+  });
+
+  audio.addEventListener('ended', () => {
+    pausedPositionMs = audio.duration ? audio.duration * 1000.0 : getExactAudioTimeMs();
+    isPlaybackRunning = false;
+    btnPlayPause.textContent = 'Play';
+  });
+
+  async function startPlayback(startAtMs = 0) {
+    initWebAudio();
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+    isStarted = true;
+    isPlaybackRunning = true;
+    ripples = [];
+    lastBeatIndex = -1;
+    barAmplitudes.fill(0);
+
+    audio.currentTime = startAtMs / 1000.0;
+    syncPlaybackClock(startAtMs);
+    btnPlayPause.textContent = 'Pause';
+
+    // Prefer audible playback (allowed on desktop and on return visits).
+    audio.muted = false;
+    try {
+      await audio.play();
+      if (!audioCtx || audioCtx.state === 'running') {
+        removeAudioUnlockListeners();
+      } else {
+        attachAudioUnlockListeners();
+      }
+      return;
+    } catch (_) {
+      // Browser autoplay policy blocks audible playback without a gesture.
+    }
+
+    // Start muted so the intro still plays instantly; unmute on first interaction.
+    audio.muted = true;
+    try {
+      await audio.play();
+    } catch (_) {
+      // Muted playback blocked too: the wall-clock fallback drives the animation.
+    }
+    attachAudioUnlockListeners();
   }
 
   btnReplay.addEventListener('click', () => startPlayback(0));
@@ -899,16 +993,11 @@
       startPlayback(0);
       return;
     }
-    if (audio.paused) {
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-      audio.play();
-      lastAudioCurrentTime = audio.currentTime;
-      lastPerfTime = performance.now();
-      btnPlayPause.textContent = 'Pause';
-    } else {
-      audio.pause();
-      btnPlayPause.textContent = 'Play';
+    if (!isPlaybackRunning) {
+      startPlayback(pausedPositionMs);
+      return;
     }
+    pausePlayback();
   });
 
   hudScrubber.addEventListener('input', () => {
@@ -916,8 +1005,7 @@
     if (audio.duration) {
       const targetSec = (parseFloat(hudScrubber.value) / 100.0) * audio.duration;
       audio.currentTime = targetSec;
-      lastAudioCurrentTime = targetSec;
-      lastPerfTime = performance.now();
+      syncPlaybackClock(targetSec * 1000.0);
       ripples = [];
       lastBeatIndex = -1;
     }
@@ -1146,22 +1234,62 @@
     // Brief polish hold (220ms) so 100% state is perceived
     await new Promise((r) => setTimeout(r, 220));
 
-    // Fade out loading screen smoothly
+    // Require one interaction so the browser permits unmuted audio playback.
+    currentLabel = 'click anywhere to start';
+    if (loadingStatus) loadingStatus.textContent = currentLabel;
     if (loadingScreen) {
-      loadingScreen.classList.add('fade-out');
+      loadingScreen.classList.add('awaiting-start');
+      loadingScreen.setAttribute('role', 'button');
+      loadingScreen.setAttribute('tabindex', '0');
+      loadingScreen.setAttribute('aria-label', 'Click anywhere or press Enter to start the intro');
     }
 
-    // Start intro immediately without requiring user to press screen
-    requestAnimationFrame(renderFrame);
-    startPlayback(0);
+    await new Promise((resolve) => {
+      let started = false;
 
-    // Cleanup loading elements after transition
-    setTimeout(() => {
-      if (progressAnimId) cancelAnimationFrame(progressAnimId);
-      if (loadingScreen) {
-        loadingScreen.style.display = 'none';
+      function beginIntro(event) {
+        if (started) return;
+        if (event && event.type === 'keydown') {
+          if (event.key !== 'Enter' && event.key !== ' ' && event.code !== 'Space') return;
+          event.preventDefault();
+        }
+
+        started = true;
+        cleanup();
+
+        // Must run inside the gesture handler so audio can start unmuted.
+        requestAnimationFrame(renderFrame);
+        startPlayback(0);
+
+        if (loadingScreen) {
+          loadingScreen.classList.remove('awaiting-start');
+          loadingScreen.classList.add('fade-out');
+          loadingScreen.removeAttribute('role');
+          loadingScreen.removeAttribute('tabindex');
+          loadingScreen.setAttribute('aria-hidden', 'true');
+          loadingScreen.blur();
+        }
+
+        setTimeout(() => {
+          if (progressAnimId) cancelAnimationFrame(progressAnimId);
+          if (loadingScreen) {
+            loadingScreen.style.display = 'none';
+          }
+        }, 600);
+
+        resolve();
       }
-    }, 600);
+
+      function cleanup() {
+        window.removeEventListener('click', beginIntro);
+        window.removeEventListener('touchend', beginIntro);
+        window.removeEventListener('keydown', beginIntro);
+      }
+
+      window.addEventListener('click', beginIntro);
+      window.addEventListener('touchend', beginIntro, { passive: true });
+      window.addEventListener('keydown', beginIntro);
+    });
   }
 
   if (document.readyState === 'loading') {

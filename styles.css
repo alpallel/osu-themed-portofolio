@@ -68,6 +68,31 @@ body {
   pointer-events: none;
 }
 
+#loading-screen.awaiting-start {
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#loading-screen.awaiting-start:focus {
+  outline: none;
+}
+
+#loading-screen.awaiting-start:focus-visible .loading-content {
+  outline: 1px solid rgba(255, 255, 255, 0.35);
+  outline-offset: 16px;
+  border-radius: 6px;
+}
+
+#loading-screen.awaiting-start .loading-status {
+  color: #ffffff;
+  animation: promptPulse 1.6s ease-in-out infinite;
+}
+
+#loading-screen.awaiting-start:active .loading-content {
+  transform: scale(0.985);
+}
+
 .loading-content {
   position: relative;
   z-index: 2;
@@ -75,6 +100,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 22px;
+  transition: transform 0.15s ease;
 }
 
 .loading-spinner {
@@ -158,6 +184,16 @@ body {
   }
   100% {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes promptPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
   }
 }
 
