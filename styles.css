@@ -6,9 +6,12 @@
   --osu-pink-light: #f37cb2;
   --osu-pink-dark: #d14f89;
   --osu-orange: #f3883d;
+  --osu-orange-rgb: 243, 136, 61;
   --osu-orange-light: #ffa85c;
   --osu-orange-dark: #e8751c;
+  --osu-logo-orange: #e0632d;
   --text-white: #ffffff;
+  --stage-scale: 0.5;
 }
 
 * {
@@ -57,6 +60,179 @@ body {
   width: 100%;
   height: 100%;
   touch-action: manipulation;
+}
+
+/* DOM main menu — the intro/triangles remain on canvas */
+#menu-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: none;
+  overflow: hidden;
+  background: #000000;
+  pointer-events: none;
+}
+
+#menu-screen.is-active {
+  display: block;
+}
+
+#menu-background {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  will-change: opacity;
+}
+
+#menu-bg-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform-origin: center;
+  will-change: transform;
+}
+
+#menu-bg-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.menu-glow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: max(240px, 25vw);
+  opacity: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  will-change: opacity;
+}
+
+#menu-glow-left {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    rgba(var(--osu-orange-rgb), 1),
+    rgba(var(--osu-orange-rgb), 0)
+  );
+}
+
+#menu-glow-right {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    rgba(var(--osu-orange-rgb), 1),
+    rgba(var(--osu-orange-rgb), 0)
+  );
+}
+
+#menu-logo-anchor {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(431px * var(--stage-scale));
+  height: calc(431px * var(--stage-scale));
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  will-change: transform;
+}
+
+#menu-logo-scale {
+  position: absolute;
+  inset: 0;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+#menu-ripples {
+  position: absolute;
+  inset: 0;
+}
+
+.menu-ripple {
+  position: absolute;
+  inset: 0;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+#menu-logo {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#menu-logo:focus-visible {
+  outline: none;
+}
+
+#menu-logo:focus-visible .menu-logo-ring {
+  outline: 2px solid rgba(255, 255, 255, 0.85);
+  outline-offset: 6px;
+}
+
+.menu-logo-ring {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--osu-logo-orange);
+  box-shadow: 0 0 calc(28px * var(--stage-scale)) rgba(0, 0, 0, 0.45);
+}
+
+.menu-logo-inner {
+  position: absolute;
+  inset: 4.99%;
+  display: block;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #1e1c24;
+}
+
+#menu-pfp {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.menu-logo-shade {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 0, 0, 0) 88%, rgba(0, 0, 0, 0.22) 100%);
+  pointer-events: none;
+}
+
+#menu-logo-dim {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  pointer-events: none;
+}
+
+#drop-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* osu!lazer Themed Loading Screen */

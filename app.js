@@ -31,8 +31,12 @@
   const REF_CY = 360;
   const RATIO_720_768 = 720 / 768; // 0.9375 (osu!framework 768p -> 720p scale)
 
-  // Background dim level for the main menu background (0 = no dim, 1 = black)
-  const BACKGROUND_DIM = 0.5;
+  // Warm beat glow on the sides of the main menu background
+  const BEAT_GLOW_PEAK_KIAI = 0.24;
+  const BEAT_GLOW_PEAK_NORMAL = 0.16;
+  const BEAT_GLOW_FADE_BEATS_KIAI = 1.8;
+  const BEAT_GLOW_FADE_BEATS_NORMAL = 2.4;
+  const BEAT_GLOW_DECAY_EXPONENT = 1.2;
 
   // DOM Elements
   const stageViewport = document.getElementById('stage-viewport');
@@ -50,12 +54,19 @@
   const loadingStatus = document.getElementById('loading-status');
   const loadingPercent = document.getElementById('loading-percent');
 
-  // Media & Texture Objects
-  const bgImage = new Image();
-  let bgLoaded = false;
-
-  const pfpImage = new Image();
-  let pfpLoaded = false;
+  // Main Menu DOM Elements
+  const menuScreen = document.getElementById('menu-screen');
+  const menuBackground = document.getElementById('menu-background');
+  const menuBgImage = document.getElementById('menu-bg-image');
+  const menuGlowLeft = document.getElementById('menu-glow-left');
+  const menuGlowRight = document.getElementById('menu-glow-right');
+  const menuLogoAnchor = document.getElementById('menu-logo-anchor');
+  const menuLogoScale = document.getElementById('menu-logo-scale');
+  const menuLogo = document.getElementById('menu-logo');
+  const menuRipples = document.getElementById('menu-ripples');
+  const menuPfp = document.getElementById('menu-pfp');
+  const menuLogoDim = document.getElementById('menu-logo-dim');
+  const dropFlash = document.getElementById('drop-flash');
 
   // Audio & Web Audio API Analyser
   const audio = new Audio();
@@ -185,15 +196,6 @@
     }
   }
 
-  // --- LogoVisualisation State (osu.Game/Screens/Menu/LogoVisualisation.cs) ---
-  // 200 bars per visualiser, repeated 5 times around 360 deg, rotating by 5 indices every 20ms
-  const BARS_PER_VISUALISER = 0;
-  const VISUALISER_ROUNDS = 5;
-  const TOTAL_BARS = BARS_PER_VISUALISER * VISUALISER_ROUNDS; // 1000 radial positions
-  const barAmplitudes = new Float32Array(BARS_PER_VISUALISER);
-  let lastVisUpdateMs = 0;
-  let visIndexOffset = 0;
-
   // --- Beat Ripples & Cursor State ---
   let ripples = [];
   let lastBeatIndex = -1;
@@ -222,6 +224,7 @@
     dpr = nextDpr;
     canvas.width = Math.round(viewW * dpr);
     canvas.height = Math.round(viewH * dpr);
+    document.documentElement.style.setProperty('--stage-scale', String(getRefScale()));
   }
   window.addEventListener('resize', handleResize);
   window.addEventListener('orientationchange', () => setTimeout(handleResize, 150));
@@ -526,8 +529,8 @@
     ctx.restore();
   }
 
-  // --- Phase 4: Main Menu State (Background + MenuSideFlashes + OsuLogo + Visualizer + Flash) ---
-  function updateAudioAnalysis(audioMs, dtMs) {
+  // --- Phase 4: DOM main menu (background + MenuSideFlashes + OsuLogo) ---
+  function updateAudioAnalysis(audioMs) {
     let rms = 0;
     let bassEnergy = 0;
 
@@ -549,133 +552,98 @@
         bassSum += freqData[i] / 255.0;
       }
       bassEnergy = bassSum / 16.0;
-
-      // Update LogoVisualisation frequency bars every 20ms (50Hz) with index_change = 5
-      if (BARS_PER_VISUALISER > 0 && Math.abs(audioMs - lastVisUpdateMs) >= 20.0) {
-        lastVisUpdateMs = audioMs;
-        visIndexOffset = (visIndexOffset + 5) % BARS_PER_VISUALISER;
-        const kiaiBoost = isKiaiTime(audioMs) ? 1.35 : 1.0;
-
-        for (let i = 0; i < BARS_PER_VISUALISER; i++) {
-          const targetIdx = (i + visIndexOffset) % BARS_PER_VISUALISER;
-          // Map bar 0..199 across frequency bins 1..180 with perceptual weighting
-          const binIdx = 1 + Math.floor((i / BARS_PER_VISUALISER) * 160);
-          const rawVal = (freqData[binIdx] / 255.0) * kiaiBoost;
-          const shaped = Math.pow(rawVal, 1.35);
-          if (shaped > barAmplitudes[targetIdx]) {
-            barAmplitudes[targetIdx] = shaped;
-          }
-        }
-      }
-    }
-
-    // Temporal decay of visualizer bars (decay_per_milisecond = 0.0024 in LogoVisualisation.cs)
-    const decay = Math.max(0, dtMs) * 0.0024;
-    for (let i = 0; i < BARS_PER_VISUALISER; i++) {
-      barAmplitudes[i] = Math.max(0, barAmplitudes[i] - decay);
     }
 
     return { rms, bassEnergy };
   }
 
-  function drawBackgroundAndSideFlashes(audioMs, scale) {
+  let menuActive = false;
+
+  function setMenuActive(active) {
+    if (menuActive === active) return;
+    menuActive = active;
+    menuScreen.classList.toggle('is-active', active);
+    menuScreen.setAttribute('aria-hidden', active ? 'false' : 'true');
+    canvas.style.visibility = active ? 'hidden' : 'visible';
+    if (!active) {
+      isHoveringLogo = false;
+      dropFlash.style.opacity = '0';
+    }
+  }
+
+  function resetMenuVisuals() {
+    ripples = [];
+    menuRipples.replaceChildren();
+    lastBeatIndex = -1;
+    hoverScale = 1.0;
+    clickScaleBoost = 0.0;
+    isHoveringLogo = false;
+  }
+
+  function spawnLogoRipple(audioMs, maxScale, alpha) {
+    const el = document.createElement('div');
+    el.className = 'menu-ripple';
+    menuRipples.appendChild(el);
+    ripples.push({ spawnMs: audioMs, maxScale, alpha, el });
+  }
+
+  function beatGlowAlpha(ageMs, fadeMs, peak) {
+    if (ageMs < 0 || ageMs >= fadeMs) return 0;
+    return Math.pow(1.0 - ageMs / fadeMs, BEAT_GLOW_DECAY_EXPONENT) * peak;
+  }
+
+  function updateMenuBackground(audioMs, scale) {
     // Outro background fade-out: in video, background fades to black between 125.25s and 125.85s
     let bgAlpha = 1.0;
     if (audioMs >= 125250) {
       bgAlpha = clamp(1.0 - (audioMs - 125250) / 600.0, 0, 1);
     }
-    if (bgAlpha <= 0.001) return;
+    menuBackground.style.opacity = bgAlpha.toFixed(3);
 
-    ctx.save();
-    ctx.globalAlpha = bgAlpha;
-
-    // Subtle parallax offset on background
+    // Subtle parallax offset on background (plus the same 1.02x overscan as before)
     const px = -smoothMouseX * 8 * scale;
     const py = -smoothMouseY * 8 * scale;
-
-    if (bgLoaded) {
-      // Cover viewport while preserving 16:9 aspect ratio with slight 1.02x overscan for parallax
-      const coverScale = Math.max(viewW / REF_W, viewH / REF_H) * 1.02;
-      const drawW = REF_W * coverScale;
-      const drawH = REF_H * coverScale;
-      ctx.drawImage(
-        bgImage,
-        (viewW - drawW) / 2 + px,
-        (viewH - drawH) / 2 + py,
-        drawW,
-        drawH
-      );
-    }
-
-    // Background dim overlay (kept under the side flashes and logo)
-    if (BACKGROUND_DIM > 0) {
-      ctx.fillStyle = `rgba(0, 0, 0, ${BACKGROUND_DIM})`;
-      ctx.fillRect(0, 0, viewW, viewH);
-    }
+    menuBgImage.style.transform =
+      `translate3d(${px.toFixed(2)}px, ${py.toFixed(2)}px, 0) scale(1.02)`;
 
     // MenuSideFlashes (osu.Game/Screens/Menu/MenuSideFlashes.cs)
+    let leftAlpha = 0.0;
+    let rightAlpha = 0.0;
     if (audioMs >= DROP_AUDIO_MS && audioMs < 123850) {
       const sinceDrop = audioMs - DROP_AUDIO_MS;
       const beatIndex = Math.floor(sinceDrop / BEAT_LENGTH_MS);
-      const beatPhase = (sinceDrop % BEAT_LENGTH_MS) / BEAT_LENGTH_MS; // 0..1 within current beat
       const kiai = isKiaiTime(audioMs);
 
-      let leftAlpha = 0.0;
-      let rightAlpha = 0.0;
-
       if (kiai) {
-        // Kiai: alternate left (even beat) and right (odd beat) on every beat
-        const pulse = Math.pow(1.0 - beatPhase, 1.8) * 0.42;
-        if (beatIndex % 2 === 0) {
-          leftAlpha = pulse;
-        } else {
-          rightAlpha = pulse;
-        }
+        // Kiai: alternate sides every beat, but let each side's glow outlive the beat
+        const fadeMs = BEAT_LENGTH_MS * BEAT_GLOW_FADE_BEATS_KIAI;
+        const leftBeat = beatIndex % 2 === 0 ? beatIndex : beatIndex - 1;
+        const rightBeat = beatIndex % 2 === 0 ? beatIndex - 1 : beatIndex;
+        leftAlpha = beatGlowAlpha(sinceDrop - leftBeat * BEAT_LENGTH_MS, fadeMs, BEAT_GLOW_PEAK_KIAI);
+        rightAlpha = beatGlowAlpha(sinceDrop - rightBeat * BEAT_LENGTH_MS, fadeMs, BEAT_GLOW_PEAK_KIAI);
       } else {
         // Normal: both sides flash on every 4-beat bar downbeat
-        const barPhase = (sinceDrop % (BEAT_LENGTH_MS * 4)) / (BEAT_LENGTH_MS * 1.6);
-        if (barPhase < 1.0) {
-          const pulse = Math.pow(1.0 - barPhase, 1.8) * 0.32;
-          leftAlpha = pulse;
-          rightAlpha = pulse;
-        }
-      }
-
-      const flashW = Math.max(240, viewW * 0.25);
-      ctx.globalCompositeOperation = 'lighter';
-
-      if (leftAlpha > 0.005) {
-        const gradL = ctx.createLinearGradient(0, 0, flashW, 0);
-        gradL.addColorStop(0, `rgba(45, 160, 245, ${leftAlpha.toFixed(3)})`);
-        gradL.addColorStop(1, 'rgba(45, 160, 245, 0)');
-        ctx.fillStyle = gradL;
-        ctx.fillRect(0, 0, flashW, viewH);
-      }
-
-      if (rightAlpha > 0.005) {
-        const gradR = ctx.createLinearGradient(viewW, 0, viewW - flashW, 0);
-        gradR.addColorStop(0, `rgba(45, 160, 245, ${rightAlpha.toFixed(3)})`);
-        gradR.addColorStop(1, 'rgba(45, 160, 245, 0)');
-        ctx.fillStyle = gradR;
-        ctx.fillRect(viewW - flashW, 0, flashW, viewH);
+        const fadeMs = BEAT_LENGTH_MS * BEAT_GLOW_FADE_BEATS_NORMAL;
+        const barElapsed = sinceDrop % (BEAT_LENGTH_MS * 4);
+        const pulse = beatGlowAlpha(barElapsed, fadeMs, BEAT_GLOW_PEAK_NORMAL);
+        leftAlpha = pulse;
+        rightAlpha = pulse;
       }
     }
 
-    ctx.restore();
+    menuGlowLeft.style.opacity = leftAlpha.toFixed(3);
+    menuGlowRight.style.opacity = rightAlpha.toFixed(3);
   }
 
-  function drawOsuLogo(audioMs, dtMs, scale, audioMetrics) {
+  function updateMenuLogo(audioMs, dtMs, scale, audioMetrics) {
     // Outro fade/shrink at end of video
     let logoAlpha = 1.0;
     let outroScale = 1.0;
-    if (audioMs >= 125450) {
-      if (audioMs >= 126950) {
-        const p = clamp((audioMs - 126950) / 600.0, 0, 1);
-        logoAlpha = 1.0 - easeOutQuad(p);
-        outroScale = 1.0 - 0.25 * easeInQuad(p);
-      }
+    if (audioMs >= 126950) {
+      const p = clamp((audioMs - 126950) / 600.0, 0, 1);
+      logoAlpha = 1.0 - easeOutQuad(p);
+      outroScale = 1.0 - 0.25 * easeInQuad(p);
     }
-    if (logoAlpha <= 0.001) return;
 
     // Beat-synced pulse (160 BPM = 375ms per beat)
     const sinceDrop = Math.max(0, audioMs - DROP_AUDIO_MS);
@@ -684,16 +652,10 @@
     const kiai = isKiaiTime(audioMs);
 
     // Spawn ripple on new beat (when music is active)
-    if (audioMs >= DROP_AUDIO_MS && audioMs < 123350) {
-      if (beatIndex !== lastBeatIndex) {
-        lastBeatIndex = beatIndex;
-        if (kiai || beatIndex % 2 === 0) {
-          ripples.push({
-            spawnMs: audioMs,
-            maxScale: kiai ? 1.28 : 1.18,
-            alpha: kiai ? 0.32 : 0.18
-          });
-        }
+    if (audioMs >= DROP_AUDIO_MS && audioMs < 123350 && beatIndex !== lastBeatIndex) {
+      lastBeatIndex = beatIndex;
+      if (kiai || beatIndex % 2 === 0) {
+        spawnLogoRipple(audioMs, kiai ? 1.28 : 1.18, kiai ? 0.32 : 0.18);
       }
     }
 
@@ -717,139 +679,43 @@
     hoverScale += (targetHover - hoverScale) * Math.min(1, dtMs * 0.015);
     clickScaleBoost *= Math.pow(0.99, dtMs);
 
-    const totalLogoScale = scale * beatScale * hoverScale * (1.0 - clickScaleBoost) * outroScale;
+    const totalScale = beatScale * hoverScale * (1.0 - clickScaleBoost) * outroScale;
 
     // Subtle cursor parallax for logo
-    const logoX = viewW / 2 - smoothMouseX * 16 * scale;
-    const logoY = viewH / 2 - smoothMouseY * 16 * scale;
+    const offsetX = -smoothMouseX * 16 * scale;
+    const offsetY = -smoothMouseY * 16 * scale;
+    menuLogoAnchor.style.transform =
+      `translate(-50%, -50%) translate3d(${offsetX.toFixed(2)}px, ${offsetY.toFixed(2)}px, 0)`;
+    menuLogoScale.style.transform = `scale(${totalScale.toFixed(4)})`;
+    menuLogoScale.style.opacity = logoAlpha.toFixed(3);
+    menuLogoDim.style.opacity = audioMs >= 125450 ? '1' : '0';
 
-    ctx.save();
-    ctx.translate(logoX, logoY);
-    ctx.scale(totalLogoScale, totalLogoScale);
-    ctx.globalAlpha = logoAlpha;
-
-    // 1. Draw Beat Ripples behind OsuLogo
+    // 1. Update Beat Ripples behind OsuLogo
     for (let i = ripples.length - 1; i >= 0; i--) {
       const rp = ripples[i];
       const age = audioMs - rp.spawnMs;
       if (age < 0 || age > 750) {
+        rp.el.remove();
         ripples.splice(i, 1);
         continue;
       }
       const p = age / 750.0;
       const rScale = 1.0 + (rp.maxScale - 1.0) * easeOutQuad(p);
-      const rAlpha = rp.alpha * (1.0 - easeOutQuad(p)) * logoAlpha;
-      ctx.save();
-      ctx.globalAlpha = rAlpha;
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 5.0 * (1.0 - p * 0.5);
-      ctx.beginPath();
-      ctx.arc(0, 0, LOGO_OUTER_R * rScale, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
+      const rAlpha = rp.alpha * (1.0 - easeOutQuad(p));
+      rp.el.style.transform = `scale(${rScale.toFixed(4)})`;
+      rp.el.style.opacity = rAlpha.toFixed(3);
+      rp.el.style.borderWidth = `${(5.0 * scale * (1.0 - p * 0.5)).toFixed(2)}px`;
     }
-
-    // 2. Draw LogoVisualisation (bars around perimeter at r = 214px)
-    if (BARS_PER_VISUALISER > 0 && TOTAL_BARS > 0 && audioMs >= DROP_AUDIO_MS && audioMs < 125350) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.34)';
-      const maxBarLen = kiai ? 135.0 : 88.0;
-      const barWidth = ((2 * Math.PI * LOGO_OUTER_R) / TOTAL_BARS) * 1.75;
-
-      for (let round = 0; round < VISUALISER_ROUNDS; round++) {
-        for (let b = 0; b < BARS_PER_VISUALISER; b++) {
-          const amp = barAmplitudes[b];
-          if (amp <= 0.008) continue;
-          const barLen = amp * maxBarLen;
-          const angle = ((round * BARS_PER_VISUALISER + b) / TOTAL_BARS) * Math.PI * 2;
-          ctx.save();
-          ctx.rotate(angle);
-          ctx.fillRect(LOGO_OUTER_R - 2, -barWidth / 2, barLen, barWidth);
-          ctx.restore();
-        }
-      }
-      ctx.restore();
-    }
-
-    // 3. Outer Shadow behind White Frame Circle (Outer Radius = 215.5px)
-    const isDimmedOutro = audioMs >= 125450;
-    ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-    ctx.shadowBlur = 28;
-    ctx.fillStyle = isDimmedOutro ? '#e0632d' : '#e0632d';
-    ctx.beginPath();
-    ctx.arc(0, 0, LOGO_OUTER_R, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // 4. Inner Circle with Profile Picture (Inner Radius = 194.0px, preserving 21.5px frame ring)
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, LOGO_INNER_R, 0, Math.PI * 2);
-    ctx.clip();
-
-    if (pfpLoaded) {
-      // Cover the circle while maintaining 1:1 aspect ratio
-      const pw = pfpImage.naturalWidth || pfpImage.width || 2048;
-      const ph = pfpImage.naturalHeight || pfpImage.height || 2048;
-      const aspect = pw / ph;
-      let dw = LOGO_INNER_R * 2;
-      let dh = LOGO_INNER_R * 2;
-      let dx = -LOGO_INNER_R;
-      let dy = -LOGO_INNER_R;
-      if (aspect > 1) {
-        dw = dh * aspect;
-        dx = -dw / 2;
-      } else if (aspect < 1) {
-        dh = dw / aspect;
-        dy = -dh / 2;
-      }
-      ctx.drawImage(pfpImage, dx, dy, dw, dh);
-    } else {
-      ctx.fillStyle = '#1e1c24';
-      ctx.fillRect(-LOGO_INNER_R, -LOGO_INNER_R, LOGO_INNER_R * 2, LOGO_INNER_R * 2);
-    }
-
-    // Subtle inner edge shadow ring inside the circular frame
-    const innerGrad = ctx.createRadialGradient(
-      0,
-      0,
-      LOGO_INNER_R * 0.88,
-      0,
-      0,
-      LOGO_INNER_R
-    );
-    innerGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    innerGrad.addColorStop(1, 'rgba(0, 0, 0, 0.22)');
-    ctx.fillStyle = innerGrad;
-    ctx.beginPath();
-    ctx.arc(0, 0, LOGO_INNER_R, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Outro dimming if track has ended
-    if (isDimmedOutro) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
-      ctx.fillRect(-LOGO_INNER_R, -LOGO_INNER_R, LOGO_INNER_R * 2, LOGO_INNER_R * 2);
-    }
-
-    ctx.restore();
-
-    ctx.restore();
   }
 
   // --- GameWideFlash (IntroTriangles.cs: Box White Additive, FadeOutFromOne(1000, Easing.Out)) ---
-  function drawGameWideFlash(tSeq) {
-    if (tSeq < DROP_SEQ_MS || tSeq >= DROP_SEQ_MS + FLASH_DURATION) return;
-    const p = clamp((tSeq - DROP_SEQ_MS) / FLASH_DURATION, 0, 1);
-    const alpha = 1.0 - easeOutQuad(p);
-    if (alpha <= 0.001) return;
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(4)})`;
-    ctx.fillRect(0, 0, viewW, viewH);
-    ctx.restore();
+  function updateDropFlash(tSeq) {
+    let alpha = 0;
+    if (tSeq >= DROP_SEQ_MS && tSeq < DROP_SEQ_MS + FLASH_DURATION) {
+      const p = clamp((tSeq - DROP_SEQ_MS) / FLASH_DURATION, 0, 1);
+      alpha = 1.0 - easeOutQuad(p);
+    }
+    dropFlash.style.opacity = alpha.toFixed(4);
   }
 
   // --- Main Render Loop ---
@@ -876,25 +742,29 @@
     const secs = ((audioMs % 60000) / 1000).toFixed(2).padStart(5, '0');
     hudTime.textContent = `${mins}:${secs}`;
 
-    // Scale from 1280x720 reference coordinate space to current viewport
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, viewW, viewH);
-
     const refScale = getRefScale();
 
-    // Update FFT visualizer & amplitude metrics
-    const audioMetrics = updateAudioAnalysis(audioMs, dtMs);
+    // Audio amplitude metrics for the menu logo pulse
+    const audioMetrics = updateAudioAnalysis(audioMs);
 
-    // Render active phase(s)
+    // Intro stays on canvas; the main menu is DOM.
     if (tSeq < DROP_SEQ_MS) {
+      setMenuActive(false);
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, viewW, viewH);
+
       drawWelcomeAndTriangles(tSeq, refScale);
       drawRulesets(tSeq, refScale);
       drawLazerLogo(tSeq, refScale);
+      updateDropFlash(0);
     } else {
-      drawBackgroundAndSideFlashes(audioMs, refScale);
-      drawOsuLogo(audioMs, dtMs, refScale, audioMetrics);
-      drawGameWideFlash(tSeq);
+      setMenuActive(true);
+
+      updateMenuBackground(audioMs, refScale);
+      updateMenuLogo(audioMs, dtMs, refScale, audioMetrics);
+      updateDropFlash(tSeq);
     }
   }
 
@@ -983,9 +853,7 @@
     }
     isStarted = true;
     isPlaybackRunning = true;
-    ripples = [];
-    lastBeatIndex = -1;
-    barAmplitudes.fill(0);
+    resetMenuVisuals();
 
     audio.currentTime = startAtMs / 1000.0;
     syncPlaybackClock(startAtMs);
@@ -1035,8 +903,7 @@
       const targetSec = (parseFloat(hudScrubber.value) / 100.0) * audio.duration;
       audio.currentTime = targetSec;
       syncPlaybackClock(targetSec * 1000.0);
-      ripples = [];
-      lastBeatIndex = -1;
+      resetMenuVisuals();
     }
   });
 
@@ -1060,22 +927,14 @@
     return clientY < 100 && clientX > viewW - hotspotWidth;
   }
 
-  function updateHoverState(clientX, clientY) {
+  function updateParallax(clientX, clientY) {
     mouseX = (clientX / Math.max(1, viewW)) * 2 - 1;
     mouseY = (clientY / Math.max(1, viewH)) * 2 - 1;
-
-    const dx = clientX - viewW / 2;
-    const dy = clientY - viewH / 2;
-    isHoveringLogo = Math.hypot(dx, dy) <= LOGO_OUTER_R * getRefScale();
-    canvas.style.cursor =
-      isStarted && getExactAudioTimeMs() >= DROP_AUDIO_MS && isHoveringLogo
-        ? 'pointer'
-        : 'default';
   }
 
   window.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'touch') return;
-    updateHoverState(e.clientX, e.clientY);
+    updateParallax(e.clientX, e.clientY);
     if (isInHudHotspot(e.clientX, e.clientY)) {
       revealHud();
     }
@@ -1103,18 +962,18 @@
     }
   });
 
-  canvas.addEventListener('pointerdown', (e) => {
-    const dx = e.clientX - viewW / 2;
-    const dy = e.clientY - viewH / 2;
-    const onLogo = Math.hypot(dx, dy) <= LOGO_OUTER_R * getRefScale();
-    if (isStarted && getExactAudioTimeMs() >= DROP_AUDIO_MS && onLogo) {
-      clickScaleBoost = 0.065;
-      ripples.push({
-        spawnMs: getExactAudioTimeMs(),
-        maxScale: 1.32,
-        alpha: 0.42
-      });
-    }
+  menuLogo.addEventListener('pointerenter', (e) => {
+    if (e.pointerType !== 'touch') isHoveringLogo = true;
+  });
+
+  menuLogo.addEventListener('pointerleave', (e) => {
+    if (e.pointerType !== 'touch') isHoveringLogo = false;
+  });
+
+  menuLogo.addEventListener('click', () => {
+    if (!isStarted || getExactAudioTimeMs() < DROP_AUDIO_MS) return;
+    clickScaleBoost = 0.065;
+    spawnLogoRipple(getExactAudioTimeMs(), 1.32, 0.42);
   });
 
   window.addEventListener('keydown', (e) => {
@@ -1190,39 +1049,41 @@
       audio.src = AUDIO_TRACK_URL;
     }
 
-    // Decode profile picture
-    const pfpPromise = new Promise((resolve) => {
-      pfpImage.onload = async () => {
-        pfpLoaded = true;
-        if (pfpImage.decode) {
-          try { await pfpImage.decode(); } catch (_) {}
+    // Decode the DOM menu images
+    function loadMenuImage(img, url) {
+      return new Promise((resolve) => {
+        if (!img) {
+          resolve();
+          return;
         }
-        resolve();
-      };
-      pfpImage.onerror = () => resolve();
-      pfpImage.src = pfpBlob ? URL.createObjectURL(pfpBlob) : 'assets/pfp.jpeg';
-      if (pfpImage.complete && pfpImage.naturalWidth > 0) {
-        pfpLoaded = true;
-        resolve();
-      }
-    });
 
-    // Decode background
-    const bgPromise = new Promise((resolve) => {
-      bgImage.onload = async () => {
-        bgLoaded = true;
-        if (bgImage.decode) {
-          try { await bgImage.decode(); } catch (_) {}
-        }
-        resolve();
-      };
-      bgImage.onerror = () => resolve();
-      bgImage.src = bgBlob ? URL.createObjectURL(bgBlob) : 'assets/blurred-bg.webp';
-      if (bgImage.complete && bgImage.naturalWidth > 0) {
-        bgLoaded = true;
-        resolve();
-      }
-    });
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          if (img.decode) {
+            img.decode().catch(() => {}).then(resolve);
+          } else {
+            resolve();
+          }
+        };
+
+        img.onload = finish;
+        img.onerror = () => {
+          if (!settled) {
+            settled = true;
+            resolve();
+          }
+        };
+        img.src = url;
+        if (img.complete && img.naturalWidth > 0) finish();
+      });
+    }
+
+    const pfpUrl = pfpBlob ? URL.createObjectURL(pfpBlob) : 'assets/pfp.jpeg';
+    const bgUrl = bgBlob ? URL.createObjectURL(bgBlob) : 'assets/blurred-bg.webp';
+    const pfpPromise = loadMenuImage(menuPfp, pfpUrl);
+    const bgPromise = loadMenuImage(menuBgImage, bgUrl);
 
     // Ensure audio can play through
     const audioReadyPromise = new Promise((resolve) => {

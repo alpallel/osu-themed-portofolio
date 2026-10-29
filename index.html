@@ -25,6 +25,35 @@
     <canvas id="intro-canvas" aria-label="osu!lazer triangles intro"></canvas>
   </main>
 
+  <!-- DOM main menu (the intro itself remains on canvas) -->
+  <section id="menu-screen" aria-label="Main menu" aria-hidden="true">
+    <div id="menu-background" aria-hidden="true">
+      <img id="menu-bg-image" alt="" decoding="async" draggable="false" />
+      <div id="menu-bg-dim"></div>
+      <div id="menu-glow-left" class="menu-glow"></div>
+      <div id="menu-glow-right" class="menu-glow"></div>
+    </div>
+
+    <div id="menu-logo-anchor">
+      <div id="menu-logo-scale">
+        <div id="menu-ripples" aria-hidden="true"></div>
+        <button id="menu-logo" type="button" aria-label="osu! logo">
+          <span class="menu-logo-ring">
+            <span class="menu-logo-inner">
+              <img id="menu-pfp" alt="Profile picture" decoding="async" draggable="false" />
+              <span class="menu-logo-shade" aria-hidden="true"></span>
+              <span id="menu-logo-dim" aria-hidden="true"></span>
+            </span>
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Portfolio content can be added here later. -->
+  </section>
+
+  <div id="drop-flash" aria-hidden="true"></div>
+
   <!-- Auto-hiding transport HUD (top-right hover or press H) -->
   <nav id="hud-bar" aria-label="Playback controls">
     <button id="btn-replay" class="hud-btn" type="button" title="Replay Intro (R)">
