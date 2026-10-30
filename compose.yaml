@@ -5,7 +5,16 @@ services:
       - "127.0.0.1:8081:80"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q0-", "http://localhost/"]
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
       interval: 1m30s
       timeout: 30s
       retries: 5
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run 
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - web

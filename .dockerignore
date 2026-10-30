@@ -3,3 +3,9 @@
 Dockerfile
 compose.yaml
 *.md
+.env
+.env.*
+.dockerignore
+.env
+.env.*
+.dockerignore
