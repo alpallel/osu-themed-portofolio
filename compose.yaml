@@ -1,0 +1,11 @@
+services:
+  web:
+    build: .
+    ports:
+      - "127.0.0.1:8080:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q0-", "http://localhost/"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
