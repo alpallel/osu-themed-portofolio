@@ -5,7 +5,7 @@ services:
       - "127.0.0.1:8081:80"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 1m30s
       timeout: 30s
       retries: 5
